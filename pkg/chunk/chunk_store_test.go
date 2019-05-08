@@ -65,13 +65,13 @@ var stores = []struct {
 }
 
 // newTestStore creates a new Store for testing.
-func newTestChunkStore(t *testing.T, schemaName string) Store {
+func newTestChunkStore(schemaName string) (Store, error) {
 	var storeCfg StoreConfig
 	flagext.DefaultValues(&storeCfg)
-	return newTestChunkStoreConfig(t, schemaName, storeCfg)
+	return newTestChunkStoreConfig(schemaName, storeCfg)
 }
 
-func newTestChunkStoreConfig(t *testing.T, schemaName string, storeCfg StoreConfig) Store {
+func newTestChunkStoreConfig(schemaName string, storeCfg StoreConfig) (Store, error) {
 	var (
 		tbmConfig TableManagerConfig
 		schemaCfg = DefaultSchemaConfig("", schemaName, 0)
@@ -79,21 +79,26 @@ func newTestChunkStoreConfig(t *testing.T, schemaName string, storeCfg StoreConf
 	flagext.DefaultValues(&tbmConfig)
 	storage := NewMockStorage()
 	tableManager, err := NewTableManager(tbmConfig, schemaCfg, maxChunkAge, storage)
-	require.NoError(t, err)
+	if err != nil {
+		return nil, err
+	}
 
 	err = tableManager.SyncTables(context.Background())
-	require.NoError(t, err)
+	if err != nil {
+		return nil, err
+	}
 
 	var limits validation.Limits
 	flagext.DefaultValues(&limits)
 	limits.MaxQueryLength = 30 * 24 * time.Hour
 	overrides, err := validation.NewOverrides(limits)
-	require.NoError(t, err)
+	if err != nil {
+		return nil, err
+	}
 
 	store := NewCompositeStore()
 	err = store.AddPeriod(storeCfg, schemaCfg.Configs[0], storage, storage, overrides)
-	require.NoError(t, err)
-	return store
+	return store, err
 }
 
 // TestChunkStore_Get tests results are returned correctly depending on the type of query
@@ -206,7 +211,8 @@ func TestChunkStore_Get(t *testing.T) {
 	for _, schema := range schemas {
 		for _, storeCase := range stores {
 			storeCfg := storeCase.configFn()
-			store := newTestChunkStoreConfig(t, schema.name, storeCfg)
+			store, err := newTestChunkStoreConfig(schema.name, storeCfg)
+			require.NoError(t, err)
 			defer store.Stop()
 
 			if err := store.Put(ctx, []Chunk{
@@ -327,7 +333,8 @@ func TestChunkStore_LabelValuesForMetricName(t *testing.T) {
 				t.Run(fmt.Sprintf("%s / %s / %s / %s", tc.metricName, tc.labelName, schema.name, storeCase.name), func(t *testing.T) {
 					t.Log("========= Running labelValues with metricName", tc.metricName, "with labelName", tc.labelName, "with schema", schema.name)
 					storeCfg := storeCase.configFn()
-					store := newTestChunkStoreConfig(t, schema.name, storeCfg)
+					store, err := newTestChunkStoreConfig(schema.name, storeCfg)
+					require.NoError(t, err)
 					defer store.Stop()
 
 					if err := store.Put(ctx, []Chunk{
@@ -430,7 +437,8 @@ func TestChunkStore_getMetricNameChunks(t *testing.T) {
 	for _, schema := range schemas {
 		for _, storeCase := range stores {
 			storeCfg := storeCase.configFn()
-			store := newTestChunkStoreConfig(t, schema.name, storeCfg)
+			store, err := newTestChunkStoreConfig(schema.name, storeCfg)
+			require.NoError(t, err)
 			defer store.Stop()
 
 			if err := store.Put(ctx, []Chunk{chunk1, chunk2}); err != nil {
@@ -470,7 +478,8 @@ func TestChunkStoreRandom(t *testing.T) {
 
 	for _, schema := range schemas {
 		t.Run(schema.name, func(t *testing.T) {
-			store := newTestChunkStore(t, schema.name)
+			store, err := newTestChunkStore(schema.name)
+			require.NoError(t, err)
 			defer store.Stop()
 
 			// put 100 chunks from 0 to 99
@@ -535,7 +544,8 @@ func TestChunkStoreRandom(t *testing.T) {
 func TestChunkStoreLeastRead(t *testing.T) {
 	// Test we don't read too much from the index
 	ctx := user.InjectOrgID(context.Background(), userID)
-	store := newTestChunkStore(t, "v6")
+	store, err := newTestChunkStore("v6")
+	require.NoError(t, err)
 	defer store.Stop()
 
 	// Put 24 chunks 1hr chunks in the store
@@ -604,13 +614,14 @@ func TestIndexCachingWorks(t *testing.T) {
 	storeMaker := stores[1]
 	storeCfg := storeMaker.configFn()
 
-	store := newTestChunkStoreConfig(t, "v9", storeCfg)
+	store, err := newTestChunkStoreConfig("v9", storeCfg)
+	require.NoError(t, err)
 	defer store.Stop()
 
 	storage := store.(CompositeStore).stores[0].Store.(*seriesStore).storage.(*MockStorage)
 
 	fooChunk1 := dummyChunkFor(model.Time(0).Add(15*time.Second), metric)
-	err := fooChunk1.Encode()
+	err = fooChunk1.Encode()
 	require.NoError(t, err)
 	err = store.Put(ctx, []Chunk{fooChunk1})
 	require.NoError(t, err)
@@ -623,6 +634,26 @@ func TestIndexCachingWorks(t *testing.T) {
 	err = store.Put(ctx, []Chunk{fooChunk2})
 	require.NoError(t, err)
 	require.Equal(t, n+1, storage.numWrites)
+}
+
+func BenchmarkIndexCaching(b *testing.B) {
+	ctx := user.InjectOrgID(context.Background(), userID)
+	storeMaker := stores[1]
+	storeCfg := storeMaker.configFn()
+
+	store, err := newTestChunkStoreConfig("v9", storeCfg)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer store.Stop()
+
+	fooChunk1 := dummyChunkFor(model.Time(0).Add(15*time.Second), BenchmarkLabels)
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		store.Put(ctx, []Chunk{fooChunk1})
+	}
 }
 
 func TestChunkStoreError(t *testing.T) {
@@ -659,7 +690,8 @@ func TestChunkStoreError(t *testing.T) {
 	} {
 		for _, schema := range schemas {
 			t.Run(fmt.Sprintf("%s / %s", tc.query, schema.name), func(t *testing.T) {
-				store := newTestChunkStore(t, schema.name)
+				store, err := newTestChunkStore(schema.name)
+				require.NoError(t, err)
 				defer store.Stop()
 
 				matchers, err := promql.ParseMetricSelector(tc.query)
