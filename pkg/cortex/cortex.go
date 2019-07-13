@@ -3,6 +3,9 @@ package cortex
 import (
 	"flag"
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/util/limits"
+	"github.com/cortexproject/cortex/pkg/util/newvalidation"
+	"log"
 	"os"
 
 	"github.com/go-kit/kit/log/level"
@@ -54,20 +57,21 @@ type Config struct {
 	AuthEnabled bool       `yaml:"auth_enabled,omitempty"`
 	PrintConfig bool       `yaml:"-"`
 
-	Server         server.Config            `yaml:"server,omitempty"`
-	Distributor    distributor.Config       `yaml:"distributor,omitempty"`
-	Querier        querier.Config           `yaml:"querier,omitempty"`
-	IngesterClient client.Config            `yaml:"ingester_client,omitempty"`
-	Ingester       ingester.Config          `yaml:"ingester,omitempty"`
-	Storage        storage.Config           `yaml:"storage,omitempty"`
-	ChunkStore     chunk.StoreConfig        `yaml:"chunk_store,omitempty"`
-	Schema         chunk.SchemaConfig       `yaml:"schema,omitempty"`
-	LimitsConfig   validation.Limits        `yaml:"limits,omitempty"`
-	Prealloc       client.PreallocConfig    `yaml:"prealloc,omitempty"`
-	Worker         frontend.WorkerConfig    `yaml:"frontend_worker,omitempty"`
-	Frontend       frontend.Config          `yaml:"frontend,omitempty"`
-	TableManager   chunk.TableManagerConfig `yaml:"table_manager,omitempty"`
-	Encoding       encoding.Config          `yaml:"-"` // No yaml for this, it only works with flags.
+	Server          server.Config            `yaml:"server,omitempty"`
+	Distributor     distributor.Config       `yaml:"distributor,omitempty"`
+	Querier         querier.Config           `yaml:"querier,omitempty"`
+	IngesterClient  client.Config            `yaml:"ingester_client,omitempty"`
+	Ingester        ingester.Config          `yaml:"ingester,omitempty"`
+	Storage         storage.Config           `yaml:"storage,omitempty"`
+	ChunkStore      chunk.StoreConfig        `yaml:"chunk_store,omitempty"`
+	Schema          chunk.SchemaConfig       `yaml:"schema,omitempty"`
+	LimitsConfig    validation.Limits        `yaml:"limits,omitempty"`
+	NewLimitsConfig limits.Limits            `yaml:"new_limits,omitempty"`
+	Prealloc        client.PreallocConfig    `yaml:"prealloc,omitempty"`
+	Worker          frontend.WorkerConfig    `yaml:"frontend_worker,omitempty"`
+	Frontend        frontend.Config          `yaml:"frontend,omitempty"`
+	TableManager    chunk.TableManagerConfig `yaml:"table_manager,omitempty"`
+	Encoding        encoding.Config          `yaml:"-"` // No yaml for this, it only works with flags.
 
 	Ruler        ruler.Config                               `yaml:"ruler,omitempty"`
 	ConfigStore  config_client.Config                       `yaml:"config_store,omitempty"`
@@ -92,6 +96,7 @@ func (c *Config) RegisterFlags(f *flag.FlagSet) {
 	c.ChunkStore.RegisterFlags(f)
 	c.Schema.RegisterFlags(f)
 	c.LimitsConfig.RegisterFlags(f)
+	c.NewLimitsConfig.RegisterLimits(f, newvalidation.LimitsToRegister)
 	c.Prealloc.RegisterFlags(f)
 	c.Worker.RegisterFlags(f)
 	c.Frontend.RegisterFlags(f)
@@ -136,6 +141,12 @@ func New(cfg Config) (*Cortex, error) {
 		os.Exit(0)
 	}
 
+	validations, err := newvalidation.New(&cfg.NewLimitsConfig)
+	if err != nil {
+		log.Fatal("Failed to initialize validation limits", err)
+	}
+	fmt.Println("Limit1 for user 1", validations.GetLimit1("1"))
+	fmt.Println("Limit1 for user 2", validations.GetLimit1("2"))
 	cortex := &Cortex{
 		target: cfg.Target,
 	}

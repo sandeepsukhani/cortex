@@ -66,3 +66,6 @@ storage:
   filesystem:
     directory: /tmp/cortex/chunks
 
+new_limits:
+  per_tenant_override_config: ./docs/overrides.yaml
+
