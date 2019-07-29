@@ -39,6 +39,8 @@ func (l *Limits) RegisterLimits(f *flag.FlagSet, limitDefinitions []LimitDefinit
 			l.limitTypes[definition.Name] = *f.Int(definition.Name, definition.DefaultValue.(int), definition.Usage)
 		case bool:
 			l.limitTypes[definition.Name] = *f.Bool(definition.Name, definition.DefaultValue.(bool), definition.Usage)
+		case time.Duration:
+			l.limitTypes[definition.Name] = *f.Duration(definition.Name, definition.DefaultValue.(time.Duration), definition.Usage)
 		}
 	}
 

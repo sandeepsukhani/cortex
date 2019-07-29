@@ -123,3 +123,7 @@ func (o *Overrides) GetBool(limitName string, userID string) bool {
 func (o *Overrides) GetInt(limitName string, userID string) int {
 	return o.getValue(limitName, userID).(int)
 }
+
+func (o *Overrides) GetDuration(limitName string, userID string) time.Duration {
+	return o.getValue(limitName, userID).(time.Duration)
+}

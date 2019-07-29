@@ -3,11 +3,13 @@ package newvalidation
 import (
 	"flag"
 	"github.com/cortexproject/cortex/pkg/util/limits"
+	"time"
 )
 
 var LimitsToRegister = []limits.LimitDefinition{
 	{"limit1", true, "first limit with bool type"},
 	{"limit2", 5, "second limit with int type"},
+	{"limit3", 1*time.Second, "third limit with time.Duration type"},
 }
 
 type Validation struct {
@@ -43,4 +45,8 @@ func (v *Validation) loadOverrides() error {
 
 func (v *Validation) GetLimit1(userID string) bool {
 	return v.overrides.GetBool("limit1", userID)
+}
+
+func (v *Validation) GetLimit3(userID string) time.Duration {
+	return v.overrides.GetDuration("limit3", userID)
 }

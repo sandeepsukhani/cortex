@@ -147,6 +147,7 @@ func New(cfg Config) (*Cortex, error) {
 	}
 	fmt.Println("Limit1 for user 1", validations.GetLimit1("1"))
 	fmt.Println("Limit1 for user 2", validations.GetLimit1("2"))
+	fmt.Println("Limit3 for user 2", validations.GetLimit3("2"))
 	cortex := &Cortex{
 		target: cfg.Target,
 	}
