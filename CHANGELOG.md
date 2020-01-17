@@ -2,6 +2,8 @@
 
 ## master / unreleased
 
+change this
+
 Note that the ruler flags need to be changed in this upgrade. You're moving from a single node ruler to something that might need to be sharded.
 If you are running with a high `-ruler.num-workers` and if you're not able to execute all your rules in `-ruler.evaluation-interval`, then you'll need to shard.
 Further, if you're using the configs service, we've upgraded the migration library and this requires some manual intervention. See full
