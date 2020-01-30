@@ -77,6 +77,7 @@ type Config struct {
 	Encoding       encoding.Config          `yaml:"-"` // No yaml for this, it only works with flags.
 	TSDB           tsdb.Config              `yaml:"tsdb" doc:"hidden"`
 	Compactor      compactor.Config         `yaml:"compactor,omitempty" doc:"hidden"`
+	DeletesConfig  chunk.DeleteStoreConfig  `yaml:"deletes,omitempty"`
 
 	Ruler         ruler.Config                               `yaml:"ruler,omitempty"`
 	ConfigDB      db.Config                                  `yaml:"configdb,omitempty"`
@@ -161,6 +162,7 @@ type Cortex struct {
 	distributor   *distributor.Distributor
 	ingester      *ingester.Ingester
 	store         chunk.Store
+	deletesStore  *chunk.DeleteRequestsStore
 	worker        frontend.Worker
 	frontend      *frontend.Frontend
 	tableManager  *chunk.TableManager

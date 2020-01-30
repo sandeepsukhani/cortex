@@ -1,6 +1,8 @@
 package chunk
 
-import "context"
+import (
+	"context"
+)
 
 // IndexClient is a client for the storage of the index (e.g. DynamoDB or Bigtable).
 type IndexClient interface {
@@ -42,4 +44,10 @@ type ReadBatchIterator interface {
 	Next() bool
 	RangeValue() []byte
 	Value() []byte
+}
+
+type DeleteRequestsStorageClient interface {
+	AddDeleteRequest(ctx context.Context, deleteRequest DeleteRequestEntry) error
+	GetDeleteRequests(ctx context.Context, deleteRequestQueries DeleteRequestQuery) ([]DeleteRequestEntry, error)
+	UpdateDeleteRequest(ctx context.Context, deleteRequestUpdate DeleteRequestEntryUpdate) error
 }

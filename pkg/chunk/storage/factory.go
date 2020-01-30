@@ -212,3 +212,7 @@ func NewBucketClient(storageConfig Config) (chunk.BucketClient, error) {
 
 	return nil, nil
 }
+
+func NewDeleteRequestsStorageClient(name string, cfg Config) (chunk.DeleteRequestsStorageClient, error) {
+	return local.NewBoltDBDeleteRequestsClient(cfg.BoltDBConfig, chunk.DeleteStoreConfig{RequestsTableName: "delete_requests"})
+}
