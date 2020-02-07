@@ -50,13 +50,16 @@ type ReadBatchIterator interface {
 	Value() []byte
 }
 
+<<<<<<< Updated upstream
 type StorageObject struct {
 	Key        string
 	ModifiedAt time.Time
 }
 
+=======
+>>>>>>> Stashed changes
 type DeleteRequestsStorageClient interface {
 	AddDeleteRequest(ctx context.Context, deleteRequest DeleteRequestEntry) error
-	GetDeleteRequests(ctx context.Context, deleteRequestQuery DeleteRequestQuery) ([]DeleteRequestEntry, error)
+	GetDeleteRequests(ctx context.Context, deleteRequestQueries DeleteRequestQuery) ([]DeleteRequestEntry, error)
 	UpdateDeleteRequest(ctx context.Context, deleteRequestUpdate DeleteRequestEntryUpdate) error
 }
