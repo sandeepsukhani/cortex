@@ -2,11 +2,15 @@ package chunk
 
 import (
 	"context"
+	"errors"
+	"io"
 	"time"
 )
 
 // DirDelim is the delimiter used to model a directory structure in an object store.
 const DirDelim = "/"
+
+var ErrStorageObjectNotFound = errors.New("object not found in storage")
 
 // IndexClient is a client for the storage of the index (e.g. DynamoDB or Bigtable).
 type IndexClient interface {
@@ -26,6 +30,7 @@ type ObjectClient interface {
 
 	PutChunks(ctx context.Context, chunks []Chunk) error
 	GetChunks(ctx context.Context, chunks []Chunk) ([]Chunk, error)
+	DeleteChunk(ctx context.Context, chunkID string) error
 }
 
 // ObjectAndIndexClient allows optimisations where the same client handles both
@@ -36,6 +41,7 @@ type ObjectAndIndexClient interface {
 // WriteBatch represents a batch of writes.
 type WriteBatch interface {
 	Add(tableName, hashValue string, rangeValue []byte, value []byte)
+	Delete(tableName, hashValue string, rangeValue []byte)
 }
 
 // ReadBatch represents the results of a QueryPages.
@@ -53,4 +59,16 @@ type ReadBatchIterator interface {
 type StorageObject struct {
 	Key        string
 	ModifiedAt time.Time
+}
+
+type DeleteClient interface {
+	IndexClient
+	Update(ctx context.Context, tableName, hashValue string, rangeValue []byte, value []byte) error
+}
+
+type StorageClient interface {
+	GetObject(ctx context.Context, objectKey string) (io.ReadCloser, error)
+	PutObject(ctx context.Context, objectKey string, object io.ReadSeeker) error
+	DeleteObject(ctx context.Context, objectKey string) error
+	List(ctx context.Context, prefix string) ([]StorageObject, error)
 }
