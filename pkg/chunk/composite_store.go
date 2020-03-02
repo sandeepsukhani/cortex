@@ -15,6 +15,18 @@ type StoreLimits interface {
 	MaxQueryLength(userID string) time.Duration
 }
 
+// TombstonesAnalyzer helps with analyzing pending tombstones
+type TombstonesAnalyzer interface {
+	GetDeletedIntervals(labels labels.Labels, from, to model.Time) Intervals
+	Len() int
+	HasTombstonesForInterval(from, to model.Time) bool
+}
+
+// TombstonesLoader keeps tombstones and cache gen numbers loaded in memory
+type TombstonesLoader interface {
+	GetPendingTombstones(userID string) (TombstonesAnalyzer, error)
+}
+
 // Store for chunks.
 type Store interface {
 	Put(ctx context.Context, chunks []Chunk) error
@@ -41,7 +53,8 @@ type CompositeStore struct {
 }
 
 type compositeStore struct {
-	stores []compositeStoreEntry
+	tombstonesLoader TombstonesLoader
+	stores           []compositeStoreEntry
 }
 
 type compositeStoreEntry struct {
@@ -51,8 +64,8 @@ type compositeStoreEntry struct {
 
 // NewCompositeStore creates a new Store which delegates to different stores depending
 // on time.
-func NewCompositeStore() CompositeStore {
-	return CompositeStore{}
+func NewCompositeStore(tombstonesLoader TombstonesLoader) CompositeStore {
+	return CompositeStore{compositeStore{tombstonesLoader: tombstonesLoader}}
 }
 
 // AddPeriod adds the configuration for a period of time to the CompositeStore
@@ -62,9 +75,9 @@ func (c *CompositeStore) AddPeriod(storeCfg StoreConfig, cfg PeriodConfig, index
 	var err error
 	switch cfg.Schema {
 	case "v9", "v10", "v11":
-		store, err = newSeriesStore(storeCfg, schema, index, chunks, limits)
+		store, err = newSeriesStore(storeCfg, schema, index, chunks, limits, c.tombstonesLoader)
 	default:
-		store, err = newStore(storeCfg, schema, index, chunks, limits)
+		store, err = newStore(storeCfg, schema, index, chunks, limits, c.tombstonesLoader)
 	}
 	if err != nil {
 		return err

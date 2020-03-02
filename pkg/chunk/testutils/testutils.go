@@ -134,7 +134,7 @@ func SetupTestChunkStore() (chunk.Store, error) {
 	var storeCfg chunk.StoreConfig
 	flagext.DefaultValues(&storeCfg)
 
-	store := chunk.NewCompositeStore()
+	store := chunk.NewCompositeStore(chunk.NewDummyTombstonesLoader())
 	err = store.AddPeriod(storeCfg, schemaCfg.Configs[0], storage, storage, overrides)
 	if err != nil {
 		return nil, err
