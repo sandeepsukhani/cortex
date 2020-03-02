@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cortexproject/cortex/pkg/chunk/purger"
+
 	"github.com/go-kit/kit/log/level"
 	"github.com/pkg/errors"
 
@@ -62,7 +64,7 @@ type Config struct {
 
 	IndexQueriesCacheConfig cache.Config `yaml:"index_queries_cache_config,omitempty"`
 
-	DeleteStoreConfig chunk.DeleteStoreConfig `yaml:"delete_store,omitempty"`
+	DeleteStoreConfig purger.DeleteStoreConfig `yaml:"delete_store,omitempty"`
 }
 
 // RegisterFlags adds the flags required to configure this flag set.
@@ -93,7 +95,7 @@ func (cfg *Config) Validate() error {
 }
 
 // NewStore makes the storage clients based on the configuration.
-func NewStore(cfg Config, storeCfg chunk.StoreConfig, schemaCfg chunk.SchemaConfig, limits StoreLimits) (chunk.Store, error) {
+func NewStore(cfg Config, storeCfg chunk.StoreConfig, schemaCfg chunk.SchemaConfig, limits StoreLimits, tombstonesLoader chunk.TombstonesLoader) (chunk.Store, error) {
 	tieredCache, err := cache.New(cfg.IndexQueriesCacheConfig)
 	if err != nil {
 		return nil, err
@@ -107,7 +109,7 @@ func NewStore(cfg Config, storeCfg chunk.StoreConfig, schemaCfg chunk.SchemaConf
 	if err != nil {
 		return nil, errors.Wrap(err, "error loading schema config")
 	}
-	stores := chunk.NewCompositeStore()
+	stores := chunk.NewCompositeStore(tombstonesLoader)
 
 	for _, s := range schemaCfg.Configs {
 		index, err := NewIndexClient(s.IndexType, cfg, schemaCfg)

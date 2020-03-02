@@ -353,7 +353,7 @@ func (t *Cortex) initIngester(cfg *Config) (serv services.Service, err error) {
 	cfg.Ingester.TSDBConfig = cfg.TSDB
 	cfg.Ingester.ShardByAllLabels = cfg.Distributor.ShardByAllLabels
 
-	t.ingester, err = ingester.New(cfg.Ingester, cfg.IngesterClient, t.overrides, t.store, prometheus.DefaultRegisterer)
+	t.ingester, err = ingester.New(cfg.Ingester, cfg.IngesterClient, t.overrides, t.store, prometheus.DefaultRegisterer, t.tombstonesLoader)
 	if err != nil {
 		return
 	}
@@ -375,7 +375,24 @@ func (t *Cortex) initStore(cfg *Config) (serv services.Service, err error) {
 		return
 	}
 
-	t.store, err = storage.NewStore(cfg.Storage, cfg.ChunkStore, cfg.Schema, t.overrides)
+	if cfg.DataPurgerConfig.Enable {
+		var indexClient chunk.IndexClient
+		indexClient, err = storage.NewIndexClient(cfg.Storage.DeleteStoreConfig.Store, cfg.Storage, cfg.Schema)
+		if err != nil {
+			return
+		}
+
+		t.deletesStore, err = purger.NewDeleteStore(cfg.Storage.DeleteStoreConfig, indexClient)
+		if err != nil {
+			return
+		}
+
+		t.tombstonesLoader = purger.NewTombstonesLoader(t.deletesStore)
+	} else {
+		t.tombstonesLoader = chunk.NewDummyTombstonesLoader()
+	}
+
+	t.store, err = storage.NewStore(cfg.Storage, cfg.ChunkStore, cfg.Schema, t.overrides, t.tombstonesLoader)
 	if err != nil {
 		return
 	}
@@ -555,29 +572,18 @@ func (t *Cortex) initDataPurger(cfg *Config) (services.Service, error) {
 		return nil, nil
 	}
 
-	var indexClient chunk.IndexClient
-	indexClient, err := storage.NewIndexClient(cfg.Storage.DeleteStoreConfig.Store, cfg.Storage, cfg.Schema)
-	if err != nil {
-		return nil, err
-	}
-
-	deleteStore, err := chunk.NewDeleteStore(cfg.Storage.DeleteStoreConfig, indexClient)
-	if err != nil {
-		return nil, err
-	}
-
 	storageClient, err := storage.NewObjectClient(cfg.DataPurgerConfig.ObjectStoreType, cfg.Storage)
 	if err != nil {
 		return nil, err
 	}
 
-	t.dataPurger, err = purger.NewDataPurger(cfg.DataPurgerConfig, deleteStore, t.store, storageClient)
+	t.dataPurger, err = purger.NewDataPurger(cfg.DataPurgerConfig, t.deletesStore, t.store, storageClient)
 	if err != nil {
 		return nil, err
 	}
 
 	var deleteRequestHandler *purger.DeleteRequestHandler
-	deleteRequestHandler, err = purger.NewDeleteRequestHandler(deleteStore)
+	deleteRequestHandler, err = purger.NewDeleteRequestHandler(t.deletesStore)
 	if err != nil {
 		return nil, err
 	}

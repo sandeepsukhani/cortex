@@ -9,17 +9,16 @@ import (
 	"github.com/prometheus/prometheus/promql"
 	"github.com/weaveworks/common/user"
 
-	"github.com/cortexproject/cortex/pkg/chunk"
 	"github.com/cortexproject/cortex/pkg/querier/queryrange"
 )
 
 // DeleteRequestHandler provides handlers for delete requests
 type DeleteRequestHandler struct {
-	deleteStore *chunk.DeleteStore
+	deleteStore *DeleteStore
 }
 
 // NewDeleteRequestHandler creates a DeleteRequestHandler
-func NewDeleteRequestHandler(deleteStore *chunk.DeleteStore) (*DeleteRequestHandler, error) {
+func NewDeleteRequestHandler(deleteStore *DeleteStore) (*DeleteRequestHandler, error) {
 	deleteMgr := DeleteRequestHandler{
 		deleteStore: deleteStore,
 	}
