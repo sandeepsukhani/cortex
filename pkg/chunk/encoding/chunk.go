@@ -320,11 +320,7 @@ func (dci *deletedChunkIterator) Scan() bool {
 			return false
 		}
 
-		dci.nextDeletedIntervalsIndex++
-		if dci.nextDeletedIntervalsIndex >= len(dci.deletedIntervals) {
-			dci.nextDeletedIntervalsIndex = -1
-		}
-
+		dci.incrementDeletedIntervalsIndex()
 		return hasNext
 	}
 
@@ -334,12 +330,27 @@ func (dci *deletedChunkIterator) Scan() bool {
 // FindAtOrAfter makes sure we reset the nextDeletedIntervalsIndex to hold the index of immediate next deleted interval with
 // reference to timestamp we are jumping to.
 func (dci *deletedChunkIterator) FindAtOrAfter(t model.Time) bool {
+	for i := range dci.deletedIntervals {
+		if dci.deletedIntervals[i].Start > t {
+			// we have moved past deleted intervals which can include t
+			dci.nextDeletedIntervalsIndex = i
+			break
+		}
+
+		if inbound(t, dci.deletedIntervals[i]) {
+			// one of the deleted intervals includes t, lets set t to timestamp greater than end of deleted interval
+			t = dci.deletedIntervals[i].End + 1
+			dci.nextDeletedIntervalsIndex = i
+			dci.incrementDeletedIntervalsIndex()
+			break
+		}
+	}
+
 	found := dci.itr.FindAtOrAfter(t)
 	if !found {
 		return false
 	}
 
-	dci.nextDeletedIntervalsIndex = dci.findNextDeletedIntervalIndex(t)
 	return true
 }
 
@@ -369,12 +380,10 @@ func (dci *deletedChunkIterator) Batch(size int) Batch {
 	// checking whether batch overlaps next deleted interval. If yes, removing values which are overlapping
 	for dci.nextDeletedIntervalsIndex != -1 && model.Time(batch.Timestamps[batch.Length-1]) >= dci.deletedIntervals[dci.nextDeletedIntervalsIndex].Start {
 		batch.dropValuesForInterval(dci.deletedIntervals[dci.nextDeletedIntervalsIndex])
-		if model.Time(batch.Timestamps[batch.Index-1]) >= dci.deletedIntervals[dci.nextDeletedIntervalsIndex].End {
-			dci.nextDeletedIntervalsIndex++
 
-			if dci.nextDeletedIntervalsIndex >= len(dci.deletedIntervals) {
-				dci.nextDeletedIntervalsIndex = -1
-			}
+		if model.Time(batch.Timestamps[batch.Index]) >= dci.deletedIntervals[dci.nextDeletedIntervalsIndex].End {
+			// batch moved past deleted intervals at index, lets move to next index
+			dci.incrementDeletedIntervalsIndex()
 		} else {
 			break
 		}
@@ -387,6 +396,14 @@ func (dci *deletedChunkIterator) Err() error {
 	return dci.itr.Err()
 }
 
+func (dci *deletedChunkIterator) incrementDeletedIntervalsIndex() {
+	dci.nextDeletedIntervalsIndex++
+
+	if dci.nextDeletedIntervalsIndex >= len(dci.deletedIntervals) {
+		dci.nextDeletedIntervalsIndex = -1
+	}
+}
+
 func inbound(t model.Time, interval model.Interval) bool {
-	return t >= interval.Start && t <= interval.End
+	return interval.Start <= t && t <= interval.End
 }
