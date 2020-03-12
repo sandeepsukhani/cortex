@@ -158,7 +158,7 @@ func (s *memorySeries) head() *desc {
 	return s.chunkDescs[len(s.chunkDescs)-1]
 }
 
-func (s *memorySeries) samplesForRange(from, through model.Time, deletedInterval []model.Interval) ([]model.SamplePair, error) {
+func (s *memorySeries) samplesForRange(from, through model.Time, deletedIntervals []model.Interval) ([]model.SamplePair, error) {
 	// Find first chunk with start time after "from".
 	fromIdx := sort.Search(len(s.chunkDescs), func(i int) bool {
 		return s.chunkDescs[i].FirstTime.After(from)
@@ -192,8 +192,8 @@ func (s *memorySeries) samplesForRange(from, through model.Time, deletedInterval
 		reuseIter = cd.C.NewIterator(reuseIter)
 
 		itr := reuseIter
-		if len(deletedInterval) != 0 {
-			itr = encoding.NewDeletedChunkIterator(itr, deletedInterval)
+		if len(deletedIntervals) != 0 {
+			itr = encoding.NewDeletedChunkIterator(itr, deletedIntervals)
 		}
 
 		chValues, err := encoding.RangeValues(itr, in)

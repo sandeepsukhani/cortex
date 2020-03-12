@@ -151,7 +151,7 @@ func (tl *tombstonesLoader) loadPendingTombstones(userID string) error {
 }
 
 // GetDeletedIntervals returns non-overlapping, sorted  deleted intervals.
-func (ts TombstonesSet) GetDeletedIntervals(labels labels.Labels, from, to model.Time) intervals_util.Intervals {
+func (ts TombstonesSet) GetDeletedIntervals(lbls labels.Labels, from, to model.Time) intervals_util.Intervals {
 	if len(ts.tombstones) == 0 || to < ts.oldestTombstoneStart || from > ts.newestTombstoneEnd {
 		return nil
 	}
@@ -169,7 +169,7 @@ func (ts TombstonesSet) GetDeletedIntervals(labels labels.Labels, from, to model
 
 		matches := false
 		for _, matchers := range ts.tombstones[i].Matchers {
-			if util.CompareMatchersWithLabels(matchers, labels) {
+			if labels.Selector(matchers).Matches(lbls) {
 				matches = true
 				break
 			}

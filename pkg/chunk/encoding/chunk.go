@@ -106,33 +106,22 @@ func (b *Batch) dropValuesForInterval(interval model.Interval) {
 		return
 	}
 
-	removedIdxStart := 0
+	reducedTs := [BatchSize]int64{}
+	reducedVals := [BatchSize]float64{}
+	length := 0
+
 	for i := range b.Timestamps {
 		if inbound(model.Time(b.Timestamps[i]), interval) {
-			removedIdxStart = i
-			break
+			continue
 		}
+		reducedTs[length] = b.Timestamps[i]
+		reducedVals[length] = b.Values[i]
+		length++
 	}
 
-	removedIdxEnd := b.Length
-	for i := b.Length - 1; i >= 0; i-- {
-		if inbound(model.Time(b.Timestamps[i]), interval) {
-			removedIdxEnd = i
-			break
-		}
-	}
-
-	if removedIdxEnd == b.Length-1 {
-		// We are removing values from tail so just reduce the length and return since
-		// Timestamps and Values are of fixed size anyways
-		b.Length = removedIdxStart
-		return
-	}
-
-	copy(b.Timestamps[removedIdxStart:removedIdxEnd+1], b.Timestamps[removedIdxEnd+1:])
-	copy(b.Values[removedIdxStart:removedIdxEnd+1], b.Values[removedIdxEnd+1:])
-
-	b.Length = b.Length - (removedIdxEnd - removedIdxStart + 1)
+	b.Timestamps = reducedTs
+	b.Values = reducedVals
+	b.Length = length
 }
 
 // RangeValues is a utility function that retrieves all values within the given
@@ -282,8 +271,8 @@ func (it *indexAccessingChunkIterator) Err() error {
 }
 
 // deletedChunkIterator helps with iterating over a partially deleted chunk.
-// It keeps index of next deleted interval that we would encounter as we keep moving forward with Scan() and Batch() calls
-// Usages should make sure deleted intervals that are passed in are sorted
+// It keeps index of next deletedInterval that we would encounter as we keep moving forward with Scan() and Batch() calls
+// Usages should make sure deletedIntervals that are passed in are sorted
 type deletedChunkIterator struct {
 	itr              Iterator
 	deletedIntervals []model.Interval
@@ -296,15 +285,14 @@ type deletedChunkIterator struct {
 // NewDeletedChunkIterator creates an iterator for a chunk which takes care of deleted data
 func NewDeletedChunkIterator(itr Iterator, deletedIntervals []model.Interval) Iterator {
 	return &deletedChunkIterator{
-		itr:                       itr,
-		deletedIntervals:          deletedIntervals,
-		nextDeletedIntervalsIndex: 0,
+		itr:              itr,
+		deletedIntervals: deletedIntervals,
 	}
 }
 
-// Scan checks if we ran into next deleted interval, if yes then it jumps ahead and fetches data right after deleted interval that we ran into.
+// Scan checks if we ran into next deletedInterval, if yes then it jumps ahead and fetches data right after deletedInterval that we ran into.
 func (dci *deletedChunkIterator) Scan() bool {
-	if dci.nextDeletedIntervalsIndex == -1 {
+	if len(dci.deletedIntervals) == 0 {
 		return dci.itr.Scan()
 	}
 
@@ -313,61 +301,82 @@ func (dci *deletedChunkIterator) Scan() bool {
 		return false
 	}
 
-	if inbound(dci.itr.Value().Timestamp, dci.deletedIntervals[dci.nextDeletedIntervalsIndex]) {
-		// we have hit a deleted interval, lets move past it
-		hasNext := dci.itr.FindAtOrAfter(dci.deletedIntervals[dci.nextDeletedIntervalsIndex].End + 1)
-		if !hasNext {
-			return false
-		}
-
-		dci.incrementDeletedIntervalsIndex()
-		return hasNext
+	// if current value is deleted then reboundTimestamp would return a different timestamp
+	newTs := dci.reboundTimestamp(dci.Value().Timestamp)
+	if newTs != dci.Value().Timestamp {
+		return dci.FindAtOrAfter(newTs)
 	}
 
 	return hasNext
 }
 
-// FindAtOrAfter makes sure we reset the nextDeletedIntervalsIndex to hold the index of immediate next deleted interval with
-// reference to timestamp we are jumping to.
+// FindAtOrAfter makes sure we cleanup unwanted deletedIntervals and
+// keeps a check of value found by FindAtOrAfter call to underlying iterator not being deleted
 func (dci *deletedChunkIterator) FindAtOrAfter(t model.Time) bool {
-	for i := range dci.deletedIntervals {
-		if dci.deletedIntervals[i].Start > t {
-			// we have moved past deleted intervals which can include t
-			dci.nextDeletedIntervalsIndex = i
+	t = dci.reboundTimestamp(t)
+
+	for {
+		found := dci.itr.FindAtOrAfter(t)
+		if !found {
+			return false
+		}
+
+		// if current value is deleted then reboundTimestamp would return a different timestamp
+		newTs := dci.reboundTimestamp(dci.Value().Timestamp)
+		if newTs == dci.Value().Timestamp {
+			// timestamp returned from reboundTimestamp is same as what was passed, which means current value is not deleted
+			return true
+		}
+
+		// current value was deleted, lets go through the process finding a new non deleted value
+		t = newTs
+	}
+}
+
+// reboundTimestamp adjusts timestamp to a new value if it is contained by any of the deletedIntervals.
+// It simply sets it to a value higher than the end of deletedInterval that contains it.
+// If none of the deletedIntervals contain the passed timestamp then the same timestamp is returned
+// It also removes deletedIntervals which have end time smaller than passed timestamps or new rebounded timestamp
+func (dci *deletedChunkIterator) reboundTimestamp(t model.Time) model.Time {
+	for _, deletedInterval := range dci.deletedIntervals {
+		if t > deletedInterval.End {
+			// end of deletedInterval is smaller than t, remove it
+			dci.deletedIntervals = dci.deletedIntervals[1:]
+			continue
+		} else if t < deletedInterval.Start {
+			// we have eliminated all the intervals we don't care about
 			break
 		}
 
-		if inbound(t, dci.deletedIntervals[i]) {
-			// one of the deleted intervals includes t, lets set t to timestamp greater than end of deleted interval
-			t = dci.deletedIntervals[i].End + 1
-			dci.nextDeletedIntervalsIndex = i
-			dci.incrementDeletedIntervalsIndex()
-			break
-		}
+		// deletedInterval includes t, lets set t to timestamp greater than end of deletedInterval
+		t = deletedInterval.End + 1
+		dci.deletedIntervals = dci.deletedIntervals[1:]
+		break
 	}
 
-	return dci.itr.FindAtOrAfter(t)
+	return t
 }
 
 func (dci *deletedChunkIterator) Value() model.SamplePair {
 	return dci.itr.Value()
 }
 
-// Batch removes values which are overlapping with all the following deleted intervals and sets
-// nextDeletedIntervalsIndex to next non-overlapping deleted interval.
+// Batch removes values which are overlapping with all the following deletedIntervals and sets
+// nextDeletedIntervalsIndex to next non-overlapping deletedInterval.
 func (dci *deletedChunkIterator) Batch(size int) Batch {
 	batch := dci.itr.Batch(size)
 	if batch.Length == 0 {
 		return batch
 	}
 
-	// checking whether batch overlaps next deleted interval. If yes, removing values which are overlapping
-	for dci.nextDeletedIntervalsIndex != -1 && model.Time(batch.Timestamps[batch.Length-1]) >= dci.deletedIntervals[dci.nextDeletedIntervalsIndex].Start {
-		batch.dropValuesForInterval(dci.deletedIntervals[dci.nextDeletedIntervalsIndex])
+	// Batch is always called after Scan so we do not have to worry about deletion at the beginning of the batch.
+	// Here we are checking whether last timestamp from batch crosses start of first deletedInterval. If yes, removing values which are overlapping
+	for len(dci.deletedIntervals) != 0 && model.Time(batch.Timestamps[batch.Length-1]) >= dci.deletedIntervals[0].Start {
+		batch.dropValuesForInterval(dci.deletedIntervals[0])
 
-		if model.Time(batch.Timestamps[batch.Index]) >= dci.deletedIntervals[dci.nextDeletedIntervalsIndex].End {
-			// batch moved past deleted intervals at index, lets move to next index
-			dci.incrementDeletedIntervalsIndex()
+		if model.Time(batch.Timestamps[batch.Length-1]) > dci.deletedIntervals[0].End {
+			// last timestamp from batch is higher than end of first deletedInterval, lets remove it to consider next deletedInterval
+			dci.deletedIntervals = dci.deletedIntervals[1:]
 		} else {
 			break
 		}
@@ -378,14 +387,6 @@ func (dci *deletedChunkIterator) Batch(size int) Batch {
 
 func (dci *deletedChunkIterator) Err() error {
 	return dci.itr.Err()
-}
-
-func (dci *deletedChunkIterator) incrementDeletedIntervalsIndex() {
-	dci.nextDeletedIntervalsIndex++
-
-	if dci.nextDeletedIntervalsIndex >= len(dci.deletedIntervals) {
-		dci.nextDeletedIntervalsIndex = -1
-	}
 }
 
 func inbound(t model.Time, interval model.Interval) bool {
