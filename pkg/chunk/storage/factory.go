@@ -252,11 +252,11 @@ func NewBucketClient(storageConfig Config) (chunk.BucketClient, error) {
 func NewObjectClient(name string, cfg Config) (chunk.ObjectClient, error) {
 	switch name {
 	case "aws", "s3":
-		return aws.NewS3ObjectClient(cfg.AWSStorageConfig.S3Config, chunk.DirDelim)
+		return aws.NewS3ObjectClient(cfg.AWSStorageConfig.S3Config)
 	case "gcs":
-		return gcp.NewGCSObjectClient(context.Background(), cfg.GCSConfig, chunk.DirDelim)
+		return gcp.NewGCSObjectClient(context.Background(), cfg.GCSConfig)
 	case "azure":
-		return azure.NewBlobStorage(&cfg.AzureStorageConfig, chunk.DirDelim)
+		return azure.NewBlobStorage(&cfg.AzureStorageConfig)
 	case "inmemory":
 		return chunk.NewMockStorage(), nil
 	case "filesystem":
