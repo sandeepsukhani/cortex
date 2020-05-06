@@ -5,15 +5,18 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/golang/snappy"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/pkg/errors"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/pkg/value"
 	errs "github.com/weaveworks/common/errors"
 
 	prom_chunk "github.com/cortexproject/cortex/pkg/chunk/encoding"
@@ -347,8 +350,10 @@ func (c *Chunk) Slice(from, through model.Time) (*Chunk, error) {
 	if err != nil {
 		return nil, err
 	}
+	lastTimestamp := itr.Value().Timestamp
 
 	for !itr.Value().Timestamp.After(through) {
+		lastTimestamp = itr.Value().Timestamp
 		oc, err := pc.Add(itr.Value())
 		if err != nil {
 			return nil, err
@@ -369,6 +374,20 @@ func (c *Chunk) Slice(from, through model.Time) (*Chunk, error) {
 
 	if pc.Len() == 0 {
 		return nil, ErrSliceNoDataInRange
+	}
+
+	if through < c.Through {
+		if lastTimestamp.Equal(through) {
+			through = through.Add(time.Second)
+		}
+		oc, err := pc.Add(model.SamplePair{Timestamp: through, Value: model.SampleValue(math.Float64frombits(value.StaleNaN))})
+		if err != nil {
+			return nil, err
+		}
+
+		if oc != nil {
+			return nil, ErrSliceChunkOverflow
+		}
 	}
 
 	nc := NewChunk(c.UserID, c.Fingerprint, c.Metric, pc, from, through)

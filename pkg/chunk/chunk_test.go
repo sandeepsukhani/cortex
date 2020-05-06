@@ -10,6 +10,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/pkg/value"
 	"github.com/stretchr/testify/require"
 
 	"github.com/cortexproject/cortex/pkg/chunk/encoding"
@@ -309,21 +310,28 @@ func TestChunk_Slice(t *testing.T) {
 	chunkStartTime := chunkEndTime.Add(-time.Hour)
 
 	for _, tc := range []struct {
-		name       string
-		sliceRange model.Interval
-		err        error
+		name             string
+		sliceRange       model.Interval
+		newChunkInterval model.Interval
+		lastSampleNaN    bool
+		err              error
 	}{
 		{
-			name:       "slice first 10 mins",
-			sliceRange: model.Interval{Start: chunkStartTime, End: chunkStartTime.Add(10 * time.Minute)},
+			name:             "slice first 10 mins",
+			sliceRange:       model.Interval{Start: chunkStartTime, End: chunkStartTime.Add(10 * time.Minute)},
+			newChunkInterval: model.Interval{Start: chunkStartTime, End: chunkStartTime.Add(10 * time.Minute).Add(time.Second)},
+			lastSampleNaN:    true,
 		},
 		{
-			name:       "slice last 10 mins",
-			sliceRange: model.Interval{Start: chunkEndTime.Add(-10 * time.Minute), End: chunkEndTime},
+			name:             "slice last 10 mins",
+			sliceRange:       model.Interval{Start: chunkEndTime.Add(-10 * time.Minute), End: chunkEndTime},
+			newChunkInterval: model.Interval{Start: chunkEndTime.Add(-10 * time.Minute), End: chunkEndTime},
 		},
 		{
-			name:       "slice in the middle",
-			sliceRange: model.Interval{Start: chunkStartTime.Add(20 * time.Minute), End: chunkEndTime.Add(-20 * time.Minute)},
+			name:             "slice in the middle",
+			sliceRange:       model.Interval{Start: chunkStartTime.Add(20 * time.Minute), End: chunkEndTime.Add(-20 * time.Minute)},
+			newChunkInterval: model.Interval{Start: chunkStartTime.Add(20 * time.Minute), End: chunkEndTime.Add(-20 * time.Minute).Add(time.Second)},
+			lastSampleNaN:    true,
 		},
 		{
 			name:       "slice out of range",
@@ -336,8 +344,10 @@ func TestChunk_Slice(t *testing.T) {
 			err:        ErrSliceNoDataInRange,
 		},
 		{
-			name:       "slice interval not aligned with sample intervals",
-			sliceRange: model.Interval{Start: chunkStartTime.Add(time.Second), End: chunkStartTime.Add(10 * time.Minute).Add(10 * time.Second)},
+			name:             "slice interval not aligned with sample intervals",
+			sliceRange:       model.Interval{Start: chunkStartTime.Add(time.Second), End: chunkStartTime.Add(10 * time.Minute).Add(10 * time.Second)},
+			newChunkInterval: model.Interval{Start: chunkStartTime.Add(time.Second), End: chunkStartTime.Add(10 * time.Minute).Add(10 * time.Second)},
+			lastSampleNaN:    true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -351,11 +361,11 @@ func TestChunk_Slice(t *testing.T) {
 			}
 			require.NoError(t, err)
 
-			require.Equal(t, tc.sliceRange.Start, newChunk.From)
-			require.Equal(t, tc.sliceRange.End, newChunk.Through)
+			require.Equal(t, tc.newChunkInterval.Start, newChunk.From)
+			require.Equal(t, tc.newChunkInterval.End, newChunk.Through)
 
 			chunkItr := originalChunk.Data.NewIterator(nil)
-			chunkItr.FindAtOrAfter(tc.sliceRange.Start)
+			chunkItr.FindAtOrAfter(tc.newChunkInterval.Start)
 
 			newChunkItr := newChunk.Data.NewIterator(nil)
 			newChunkItr.Scan()
@@ -367,8 +377,13 @@ func TestChunk_Slice(t *testing.T) {
 				newChunkHasMoreSamples := newChunkItr.Scan()
 
 				// originalChunk and newChunk both should end at same time or newChunk should end before or at slice end time
-				if !originalChunksHasMoreSamples || chunkItr.Value().Timestamp > tc.sliceRange.End {
-					require.Equal(t, false, newChunkHasMoreSamples)
+				if !originalChunksHasMoreSamples || chunkItr.Value().Timestamp > tc.newChunkInterval.End {
+					if tc.lastSampleNaN {
+						require.Equal(t, tc.newChunkInterval.End, newChunkItr.Value().Timestamp)
+						require.Equal(t, true, value.IsStaleNaN(float64(newChunkItr.Value().Value)))
+					} else {
+						require.Equal(t, false, newChunkHasMoreSamples)
+					}
 					break
 				}
 

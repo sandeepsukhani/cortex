@@ -1,11 +1,13 @@
 package series
 
 import (
+	"fmt"
 	"math/rand"
 	"testing"
 
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/pkg/value"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/stretchr/testify/require"
 )
@@ -80,14 +82,32 @@ func TestDeletedSeriesIterator(t *testing.T) {
 		i := int64(-1)
 		it := NewDeletedSeriesIterator(NewConcreteSeriesIterator(&cs), c.r)
 		ranges := c.r[:]
+		staleMarkerTs := int64(-1)
 
 		for it.Next() {
-			i++
+			if staleMarkerTs == -1 {
+				i++
+			} else {
+				staleMarkerTs = -1
+			}
+
 			for _, tr := range ranges {
 				if inbound(model.Time(i), tr) {
+					// we expect stale marker only for start timestamp from first interval in continuous blocks of delete time intervals
+					if staleMarkerTs == -1 {
+						staleMarkerTs = int64(tr.Start)
+						ts, v := it.At()
+						require.Equal(t, int64(tr.Start), ts, fmt.Sprint(c, tr, ranges))
+						require.Equal(t, true, value.IsStaleNaN(v))
+					}
+
 					i = int64(tr.End + 1)
 					ranges = ranges[1:]
 				}
+			}
+
+			if staleMarkerTs != -1 {
+				continue
 			}
 
 			require.Equal(t, true, i < 1000)

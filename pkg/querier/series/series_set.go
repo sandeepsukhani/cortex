@@ -17,14 +17,15 @@
 package series
 
 import (
+	"math"
 	"sort"
-
-	"github.com/cortexproject/cortex/pkg/chunk/purger"
 
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/pkg/value"
 	"github.com/prometheus/prometheus/storage"
 
+	"github.com/cortexproject/cortex/pkg/chunk/purger"
 	"github.com/cortexproject/cortex/pkg/prom1/storage/metric"
 )
 
@@ -247,6 +248,7 @@ func (d DeletedSeries) Iterator() storage.SeriesIterator {
 type DeletedSeriesIterator struct {
 	itr              storage.SeriesIterator
 	deletedIntervals []model.Interval
+	sendStaleMarker  bool
 }
 
 func NewDeletedSeriesIterator(itr storage.SeriesIterator, deletedIntervals []model.Interval) storage.SeriesIterator {
@@ -263,24 +265,40 @@ func (d DeletedSeriesIterator) Seek(t int64) bool {
 
 	seekedTs, _ := d.itr.At()
 	if d.isDeleted(seekedTs) {
-		// point we have seeked into is deleted, Next() should find a new non-deleted sample which is after t and seekedTs
-		return d.Next()
+		// point we have seeked into is deleted, Next() should find a new non-deleted sample which is after t and seekedTs.
+		// we do not want to include a staleless marker when doing a seek because this should be the beginning of data that is being fetched
+		// which means there is no historic data to cause promql engine to send samples for deleted interval.
+		return d.next(false)
 	}
 
 	return true
 }
 
 func (d DeletedSeriesIterator) At() (t int64, v float64) {
+	if d.sendStaleMarker {
+		return int64(d.deletedIntervals[0].Start), math.Float64frombits(value.StaleNaN)
+	}
 	return d.itr.At()
 }
 
-func (d DeletedSeriesIterator) Next() bool {
+func (d *DeletedSeriesIterator) Next() bool {
+	return d.next(true)
+}
+
+func (d *DeletedSeriesIterator) next(withStalenessMarker bool) bool {
 	for d.itr.Next() {
 		ts, _ := d.itr.At()
 
 		if d.isDeleted(ts) {
+			// send a staleness marker to avoid promql including series when doing a lookback
+			if withStalenessMarker && !d.sendStaleMarker {
+				d.sendStaleMarker = true
+				return true
+			}
 			continue
 		}
+		d.sendStaleMarker = false
+
 		return true
 	}
 	return false
