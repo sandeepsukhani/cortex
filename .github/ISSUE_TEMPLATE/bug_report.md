@@ -12,8 +12,8 @@ A clear and concise description of what the bug is.
 
 **To Reproduce**
 Steps to reproduce the behavior:
-1. Started Cortex (SHA or version)
-2. Performed Operations(Read/Write/Others)
+1. Start Cortex (SHA or version)
+2. Perform Operations(Read/Write/Others)
 
 **Expected behavior**
 A clear and concise description of what you expected to happen.
